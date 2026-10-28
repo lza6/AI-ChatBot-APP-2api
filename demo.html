@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI ChatBot v10.0.0 Pro · 2API Demo</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e7eaf0;
+    --muted: #8b94a7; --accent: #4f8cff; --ok: #34d399; --err: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px;
+    border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted); }
+  .badge.ok { color: var(--ok); border-color: #1f513f; }
+  .badge.err { color: var(--err); border-color: #5a2626; }
+  main { display: grid; grid-template-columns: 1fr 280px; gap: 0; height: calc(100vh - 52px); }
+  #chat { display: flex; flex-direction: column; min-height: 0; }
+  #log { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; }
+  .me { align-self: flex-end; background: #1d3a6b; }
+  .ai { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); }
+  .meta { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  form { display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--line); background: var(--panel); }
+  textarea { flex: 1; resize: none; height: 52px; padding: 10px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+  button { padding: 0 20px; border-radius: 10px; border: 0; background: var(--accent);
+    color: #fff; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  aside { border-left: 1px solid var(--line); background: var(--panel); padding: 16px;
+    overflow-y: auto; }
+  aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin: 0 0 10px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 14px 0 6px; }
+  select, input[type=checkbox] { font: inherit; }
+  select { width: 100%; padding: 8px; border-radius: 8px; background: var(--bg);
+    color: var(--text); border: 1px solid var(--line); }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px; font-size: 11px; overflow-x: auto; color: var(--muted); }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AI ChatBot v10.0.0 Pro · 2API</h1>
+  <span class="badge" id="status">检查中…</span>
+  <span class="badge">上游 chat_android</span>
+</header>
+<main>
+  <section id="chat">
+    <div id="log"></div>
+    <form id="form">
+      <textarea id="input" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+      <button id="send" type="submit">发送</button>
+    </form>
+  </section>
+  <aside>
+    <h2>参数</h2>
+    <label for="model">模型（免费层实际全部路由到 gpt-4o-mini）</label>
+    <select id="model"></select>
+    <label><input type="checkbox" id="stream" checked /> 伪流式输出（本地打字机）</label>
+    <label><input type="checkbox" id="ctx" checked /> 携带多轮上下文</label>
+    <h2 style="margin-top:22px">服务状态</h2>
+    <pre id="health">—</pre>
+    <div class="hint">OpenAI 兼容端点：<code>POST /v1/chat/completions</code><br/>可直接作为 new-api 渠道 BaseURL 使用。</div>
+  </aside>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const history = [];
+
+function addMsg(role, text) {
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + (role === "user" ? "me" : "ai");
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = role === "user" ? "你" : "AI";
+  const body = document.createElement("div");
+  body.textContent = text;
+  wrap.append(meta, body);
+  $("log").appendChild(wrap);
+  $("log").scrollTop = $("log").scrollHeight;
+  return body;
+}
+
+async function refresh() {
+  try {
+    const r = await fetch("/health");
+    const j = await r.json();
+    $("status").className = "badge ok";
+    $("status").textContent = "在线 · p50 " + (j.p50_ms ?? "-") + "ms";
+    $("health").textContent = JSON.stringify(j, null, 2);
+  } catch (e) {
+    $("status").className = "badge err";
+    $("status").textContent = "离线";
+  }
+}
+
+async function loadModels() {
+  const r = await fetch("/v1/models");
+  const j = await r.json();
+  $("model").innerHTML = j.data.map((m) => `<option>${m.id}</option>`).join("");
+}
+
+$("form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const text = $("input").value.trim();
+  if (!text) return;
+  $("input").value = "";
+  addMsg("user", text);
+
+  const payload = { model: $("model").value, messages: [...($("ctx").checked ? history : []), { role: "user", content: text }] };
+  if ($("ctx").checked) history.push({ role: "user", content: text });
+
+  $("send").disabled = true;
+  const target = addMsg("assistant", "");
+  const started = performance.now();
+
+  try {
+    if ($("stream").checked) {
+      const r = await fetch("/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, stream: true }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error?.message || r.status);
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "", full = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6);
+          if (data === "[DONE]") continue;
+          const j = JSON.parse(data);
+          const piece = j.choices?.[0]?.delta?.content;
+          if (piece) { full += piece; target.textContent = full; $("log").scrollTop = $("log").scrollHeight; }
+        }
+      }
+      if ($("ctx").checked) history.push({ role: "assistant", content: full });
+    } else {
+      const r = await fetch("/v1/chat/completions", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error?.message || r.status);
+      const content = j.choices[0].message.content;
+      target.textContent = content;
+      if ($("ctx").checked) history.push({ role: "assistant", content });
+    }
+    target.parentElement.querySelector(".meta").textContent =
+      "AI · " + Math.round(performance.now() - started) + "ms";
+  } catch (e) {
+    target.parentElement.className = "msg ai";
+    target.textContent = "⚠️ " + e.message;
+  } finally {
+    $("send").disabled = false;
+    refresh();
+  }
+});
+
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("form").requestSubmit(); }
+});
+
+loadModels().then(refresh);
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>

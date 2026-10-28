@@ -1,0 +1,13 @@
+# 逆向原料（不入库）
+raw/
+apkt/
+jadx-out/
+*.apk
+*.dex
+
+# 运行产物
+demo.log
+__pycache__/
+*.pyc
+jadx.log
+evidence_demo.png
